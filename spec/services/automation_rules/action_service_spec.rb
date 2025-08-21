@@ -51,6 +51,45 @@ RSpec.describe AutomationRules::ActionService do
         expect(WebhookJob).to receive(:perform_later)
         described_class.new(rule, account, conversation).perform
       end
+
+      context 'when triggered by a private note in an API channel' do
+        let(:api_channel) { create(:channel_api, account: account) }
+        let(:api_inbox) { create(:inbox, account: account, channel: api_channel) }
+        let(:api_conversation) { create(:conversation, account: account, inbox: api_inbox) }
+        let(:private_message) { create(:message, conversation: api_conversation, private: true, content: 'Private note content') }
+
+        it 'includes private note data in webhook payload' do
+          expected_payload = api_conversation.webhook_data.merge(
+            event: "automation_event.#{rule.event_name}",
+            private_note: private_message.webhook_data
+          )
+          
+          expect(WebhookJob).to receive(:perform_later).with('https://example.com', expected_payload)
+          described_class.new(rule, account, api_conversation, private_message).perform
+        end
+      end
+
+      context 'when triggered by a regular message' do
+        let(:regular_message) { create(:message, conversation: conversation, private: false, content: 'Regular message') }
+
+        it 'does not include private note data in webhook payload' do
+          expected_payload = conversation.webhook_data.merge(event: "automation_event.#{rule.event_name}")
+          
+          expect(WebhookJob).to receive(:perform_later).with('https://example.com', expected_payload)
+          described_class.new(rule, account, conversation, regular_message).perform
+        end
+      end
+
+      context 'when triggered by a private note in a non-API channel' do
+        let(:private_message) { create(:message, conversation: conversation, private: true, content: 'Private note content') }
+
+        it 'does not include private note data in webhook payload' do
+          expected_payload = conversation.webhook_data.merge(event: "automation_event.#{rule.event_name}")
+          
+          expect(WebhookJob).to receive(:perform_later).with('https://example.com', expected_payload)
+          described_class.new(rule, account, conversation, private_message).perform
+        end
+      end
     end
 
     describe '#perform with send_message action' do
