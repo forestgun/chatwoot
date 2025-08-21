@@ -1,8 +1,9 @@
 class AutomationRules::ActionService < ActionService
-  def initialize(rule, account, conversation)
+  def initialize(rule, account, conversation, triggering_message = nil)
     super(conversation)
     @rule = rule
     @account = account
+    @triggering_message = triggering_message
     Current.executed_by = rule
   end
 
@@ -37,6 +38,12 @@ class AutomationRules::ActionService < ActionService
 
   def send_webhook_event(webhook_url)
     payload = @conversation.webhook_data.merge(event: "automation_event.#{@rule.event_name}")
+    
+    # Include private note data if the triggering message is a private note from an API channel
+    if private_note_in_api_channel?
+      payload[:private_note] = @triggering_message.webhook_data
+    end
+    
     WebhookJob.perform_later(webhook_url[0], payload)
   end
 
@@ -60,5 +67,12 @@ class AutomationRules::ActionService < ActionService
     teams.each do |team|
       TeamNotifications::AutomationNotificationMailer.conversation_creation(@conversation, team, params[0][:message])&.deliver_now
     end
+  end
+
+  private
+
+  def private_note_in_api_channel?
+    @triggering_message&.private? && 
+      @conversation.inbox.channel_type == 'Channel::Api'
   end
 end
